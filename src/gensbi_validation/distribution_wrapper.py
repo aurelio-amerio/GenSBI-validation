@@ -33,19 +33,33 @@ class PosteriorWrapper:
         self.default_x = None
         self.rngs = rngs
         
-    def ravel(self,x):
+    def _ravel(self,x):
         return x.reshape(x.shape[0], -1)
     
-    def unravel_theta(self,x):
+    def _unravel_theta(self,x):
         return x.reshape(x.shape[0], self.pipeline.dim_obs, -1)
     
-    def unravel_xs(self,x):
+    def _unravel_xs(self,x):
         return x.reshape(x.shape[0], self.pipeline.dim_cond, -1)
+    
+    def _process_x(self, x):
+        assert x.ndim in (2, 3), "x must be of shape (batch, dim) or (batch, dim, ch)"
+        if self.pipeline.ch_cond is None:
+            ch = self.pipeline.ch_obs
+        else:
+            ch = self.pipeline.ch_cond
+            
+        if x.ndim == 3:
+            assert x.shape[2] == ch, f"Wrong number of channels, expected {ch}, got {x.shape[2]}"
+        
+        if x.ndim == 2:
+            x = self._unravel_xs(x)
+            
+        return self._ravel(x)
 
     def set_default_x(self, x):
-        assert x.ndim in (2, 3), "x must be of shape (batch, dim) or (batch, dim, ch)"
-        self.default_x = self.ravel(x)
-
+        
+        self.default_x = self._process_x(x)
     def sample(
         self,
         sample_shape,
@@ -59,12 +73,12 @@ class PosteriorWrapper:
             cond = x.numpy()
             
         if cond.ndim == 2:
-            cond = self.unravel_xs(cond)
+            cond = self._unravel_xs(cond)
 
         res = self.pipeline.sample(
             key, cond, sample_shape[0], *self.args, **self.kwargs
         )
-        res = self.ravel(res)
+        res = self._ravel(res)
         return torch.from_numpy(np.array(res))
 
     def sample_batched(
@@ -76,10 +90,7 @@ class PosteriorWrapper:
         if x is None:
             cond = self.default_x.numpy()
         else:
-            cond = x.numpy()
-            
-        if cond.ndim == 2:
-            cond = self.unravel_xs(cond)
+            cond = self._process_x(x).numpy()
 
         sampler = self.pipeline.get_sampler(self.rngs.sample(), cond)
         batched_sampler = get_batch_sampler(
