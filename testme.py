@@ -1,7 +1,7 @@
 # %%
 import os
 
-os.environ["JAX_PLATFORMS"] = "cpu"
+# os.environ["JAX_PLATFORMS"] = "cpu"
 
 import jax
 import jax.numpy as jnp
@@ -14,6 +14,9 @@ from jax import Array
 from gensbi.recipes import (
     ConditionalFlowPipeline,
 )
+
+from sbi.analysis.plot import sbc_rank_plot
+from sbi.diagnostics import check_sbc, check_tarp, run_sbc, run_tarp
 
 from gensbi.models import Simformer, SimformerParams, Flux1, Flux1Params
 
@@ -107,128 +110,41 @@ pipeline.train(nnx.Rngs(0), nsteps=100, save_model=False)
 # %%
 posterior = PosteriorWrapper(pipeline, rngs=nnx.Rngs(1))
 # %%
-cond = jnp.zeros((10, dim_cond, ch))
+cond = jnp.zeros((1, dim_cond, ch))
 #%%
-res = posterior.sample((10,), x=torch.from_numpy(np.array(cond)))
+res = posterior.sample((100,), x=torch.from_numpy(np.array(cond)))
 #%%
 res.shape
 #%%
 cond = jnp.zeros((10, dim_cond, ch))
 res2 = posterior.sample_batched((20,), x=torch.from_numpy(np.array(cond)))
 #%%
-res2.shape
+# %%
+obs, cond = next(iter(val_dataset_cond))
+# %%
+thetas, xs = posterior.ravel(obs), posterior.ravel(cond)
+thetas = torch.Tensor(np.array(thetas))
+xs = torch.Tensor(np.array(xs))
 #%%
-# samples = sampler(key, 10)
-# cond = np.zeros((1, dim_cond, ch))
-# # %%
-# samples = posterior.sample((10,), x=torch.from_numpy(cond))
-# # %%
-# samples.shape
-
+ranks, dap_samples = run_sbc(thetas, xs, posterior)
+check_stats = check_sbc(ranks, thetas, dap_samples, 1_000)
+print(check_stats)
+f, ax = sbc_rank_plot(ranks, 1_000, plot_type="hist", num_bins=30)
+#%%
+ecp, alpha = run_tarp(
+    torch.Tensor(thetas),
+    torch.Tensor(xs),
+    posterior,
+    references=None,  # will be calculated automatically.
+    num_posterior_samples=100,
+)
 
 # %%
-
-
-
-def get_batch_sampler(
-    sampler_fn: Callable,
-    # nsamples: int,
-):  
-    @jax.jit(static_argnums=[2])
-    def sampler(key: Array, cond: Array, nsamples: int) -> Array:
-        return sampler_fn(key, cond[None, ...], nsamples)
-
-    # Vectorize sampler_fn over batch dimension
-    batched_sampler = jax.vmap(sampler, in_axes=(0, 0, None))
-    return batched_sampler
-
-def get_batch_sampler2(
-    sampler_fn: Callable,
-    nsamples: int,
-):  
-    @jax.jit
-    def sampler(key: Array, cond: Array) -> Array:
-        return sampler_fn(key, cond[None,...], nsamples)
-
-    # Vectorize sampler_fn over batch dimension
-    batched_sampler = jax.vmap(sampler)
-    return batched_sampler
-
-
-def get_batch_sampler3(
-    sampler_fn: Callable,
-    ncond: int,
-):  
-    @jax.jit
-    def sampler(key) -> Array:
-        return sampler_fn(key, ncond)
-
-    # Vectorize sampler_fn over batch dimension
-    batched_sampler = jax.vmap(sampler)
-    return batched_sampler
-
-
+atc, ks_pval = check_tarp(ecp, alpha)
+print(atc, "Should be close to 0")
+print(ks_pval, "Should be larger than 0.05")
 # %%
-ncond = 3
-batch_size = 20
-cond = jnp.zeros((ncond, dim_cond, ch))
-sampler_ = pipeline.get_sampler(jax.random.PRNGKey(0), cond)
-#%%
-batched_sampler = get_batch_sampler(
-    pipeline.sample,
-    # nsamples=10,
-)
+from sbi.analysis.plot import plot_tarp
 
-batched_sampler2 = get_batch_sampler2(
-    pipeline.sample,
-    nsamples=batch_size,
-)
-
-batched_sampler3 = get_batch_sampler3(
-    sampler_,
-    ncond=ncond,
-)
-#%%
-
-keys = jax.random.split(jax.random.PRNGKey(0), cond.shape[0])
-res1 = batched_sampler(
-    keys,
-    cond,
-    10,
-)
-
-keys = jax.random.split(jax.random.PRNGKey(0), cond.shape[0])
-res2 = batched_sampler2(
-    keys,
-    cond,
-)
-
-keys = jax.random.split(jax.random.PRNGKey(0), batch_size)
-res3 = batched_sampler3(
-    keys,
-)
-#%%
-res1.shape, res2.shape, res3.shape, (batch_size, ncond, dim_obs, ch)
-
-# %%
-%%timeit
-keys = jax.random.split(jax.random.PRNGKey(0), cond.shape[0])
-res1 = batched_sampler(
-    keys,
-    cond,
-    batch_size,
-)
-# %%
-%%timeit
-keys = jax.random.split(jax.random.PRNGKey(0), cond.shape[0])
-res2 = batched_sampler2(
-    keys,
-    cond,
-)
-#%%
-%%timeit 
-keys = jax.random.split(jax.random.PRNGKey(0), batch_size)
-res3 = batched_sampler3(
-    keys,
-)
+plot_tarp(ecp, alpha)
 # %%

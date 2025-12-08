@@ -8,7 +8,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 dependencies = [
-    # "gensbi @ git+https://github.com/aurelio-amerio/GenSBI.git",
+    "gensbi @ git+https://github.com/aurelio-amerio/GenSBI.git",
+    "torch<2.6",
+    "torchvision",
     "sbi>=0.25.0"
 ]
 
@@ -28,6 +30,7 @@ sources = ["src"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
 
 [tool.pytest.ini_options]
 env = [
