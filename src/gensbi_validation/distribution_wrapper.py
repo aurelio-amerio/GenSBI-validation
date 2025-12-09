@@ -8,6 +8,7 @@ from jax import Array
 from einops import rearrange
 
 from typing import Callable, Optional
+from gensbi.recipes.pipeline import AbstractPipeline
 
 
 def get_batch_sampler(
@@ -24,8 +25,10 @@ def get_batch_sampler(
 
 
 class PosteriorWrapper:
-    def __init__(self, pipeline, *args, rngs: nnx.Rngs, **kwargs):
-        """ """
+    def __init__(self, pipeline: AbstractPipeline, *args, rngs: nnx.Rngs, **kwargs):
+        """ 
+        Wrap a GenSBI pipeline into a distribution compatible with sbi.
+        """
 
         self.pipeline = pipeline
         self.args = args
@@ -33,45 +36,54 @@ class PosteriorWrapper:
         self.default_x = None
         self.rngs = rngs
         
-    def _ravel(self,x):
+        self.ch_theta = self.pipeline.ch_obs
+        if self.pipeline.ch_cond is None:
+            self.ch_x = self.ch_theta
+        else:
+            self.ch_x = self.pipeline.ch_cond
+            
+        self.dim_x = self.pipeline.dim_cond
+        self.dim_theta = self.pipeline.dim_obs
+
+    def _ravel(self, x):
         return x.reshape(x.shape[0], -1)
-    
-    def _unravel_theta(self,x):
-        return x.reshape(x.shape[0], self.pipeline.dim_obs, -1)
-    
-    def _unravel_xs(self,x):
-        return x.reshape(x.shape[0], self.pipeline.dim_cond, -1)
-    
+
+    def _unravel_theta(self, x):
+        return x.reshape(x.shape[0], self.dim_theta, self.ch_theta)
+
+    def _unravel_xs(self, x):
+        return x.reshape(x.shape[0], self.dim_x, self.ch_x)
+
     def _process_x(self, x):
         assert x.ndim in (2, 3), "x must be of shape (batch, dim) or (batch, dim, ch)"
-        if self.pipeline.ch_cond is None:
-            ch = self.pipeline.ch_obs
-        else:
-            ch = self.pipeline.ch_cond
-            
+
+
         if x.ndim == 3:
-            assert x.shape[2] == ch, f"Wrong number of channels, expected {ch}, got {x.shape[2]}"
-        
+            assert (
+                x.shape[2] == self.ch_x
+            ), f"Wrong number of channels, expected {self.ch_x}, got {x.shape[2]}"
+
         if x.ndim == 2:
             x = self._unravel_xs(x)
-            
+
         return self._ravel(x)
 
     def set_default_x(self, x):
-        
+
         self.default_x = self._process_x(x)
+
     def sample(
         self,
         sample_shape,
         x: Optional[torch.Tensor] = None,
-        show_progress_bars: bool = False,
+        **kwargs, # does nothing, for compatibility
     ):
         key = self.rngs.sample()
         if x is None:
             cond = self.default_x.numpy()
         else:
             cond = x.numpy()
-            
+
         if cond.ndim == 2:
             cond = self._unravel_xs(cond)
 
@@ -85,7 +97,7 @@ class PosteriorWrapper:
         self,
         sample_shape,
         x: Optional[torch.Tensor] = None,
-        show_progress_bars: bool = False,
+        **kwargs, # does nothing, for compatibility
     ):
         if x is None:
             cond = self.default_x.numpy()
