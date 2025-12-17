@@ -1,3 +1,3 @@
-from distribution_wrapper import PosteriorWrapper
+from .distribution_wrapper import PosteriorWrapper
 
 __all__ = ['PosteriorWrapper']
