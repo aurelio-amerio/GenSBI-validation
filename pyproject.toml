@@ -8,14 +8,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 dependencies = [
-    "gensbi @ git+https://github.com/aurelio-amerio/GenSBI.git",
+    # "gensbi @ git+https://github.com/aurelio-amerio/GenSBI.git",
     "torch<2.6",
     "torchvision",
     "sbi>=0.25.0"
 ]
-
-[project.optional-dependencies]
-cuda12 = ["gensbi[cuda12] @ git+https://github.com/aurelio-amerio/GenSBI.git"]
 
 [project.urls]
 Homepage = "https://github.com/aurelio-amerio/GenSBI-validation"
