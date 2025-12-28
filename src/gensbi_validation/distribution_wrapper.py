@@ -25,7 +25,7 @@ def get_batch_sampler(
 
 
 class PosteriorWrapper:
-    def __init__(self, pipeline: AbstractPipeline, *args, rngs: nnx.Rngs, **kwargs):
+    def __init__(self, pipeline: AbstractPipeline, *args, rngs: nnx.Rngs, theta_shape = None, x_shape = None, **kwargs):
         """ 
         Wrap a GenSBI pipeline into a distribution compatible with sbi.
         """
@@ -36,14 +36,22 @@ class PosteriorWrapper:
         self.default_x = None
         self.rngs = rngs
         
-        self.ch_theta = self.pipeline.ch_obs
-        if self.pipeline.ch_cond is None:
-            self.ch_x = self.ch_theta
+        if theta_shape is not None:
+            self.dim_theta = theta_shape[0]
+            self.ch_theta = theta_shape[1]
         else:
-            self.ch_x = self.pipeline.ch_cond
+            self.ch_theta = self.pipeline.ch_obs
+            self.dim_theta = self.pipeline.dim_obs
             
-        self.dim_x = self.pipeline.dim_cond
-        self.dim_theta = self.pipeline.dim_obs
+        if x_shape is not None:
+            self.dim_x = x_shape[0]
+            self.ch_x = x_shape[1]
+        else:
+            if self.pipeline.ch_cond is None:
+                self.ch_x = self.ch_theta
+            else:
+                self.ch_x = self.pipeline.ch_cond
+            self.dim_x = self.pipeline.dim_cond
 
     def _ravel(self, x):
         return x.reshape(x.shape[0], -1)
@@ -102,7 +110,10 @@ class PosteriorWrapper:
         if x is None:
             cond = self.default_x.numpy()
         else:
-            cond = self._process_x(x).numpy()
+            cond = x.numpy()
+            
+        if cond.ndim == 2:
+            cond = self._unravel_xs(cond)
 
         sampler = self.pipeline.get_sampler(self.rngs.sample(), cond)
         batched_sampler = get_batch_sampler(
