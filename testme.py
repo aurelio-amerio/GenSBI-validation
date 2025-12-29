@@ -27,7 +27,7 @@ from gensbi_validation.distribution_wrapper import PosteriorWrapper
 
 
 nsamples = 1000
-rng = jax.random.PRNGKey(0)
+key = jax.random.PRNGKey(0)
 
 dim_obs = 2
 dim_cond = 7
@@ -36,8 +36,8 @@ dim_joint = dim_obs + dim_cond
 ch = 1
 
 
-theta = jax.random.normal(rng, (nsamples, dim_obs, ch))
-x = jax.random.normal(rng, (nsamples, dim_cond, ch))
+theta = jax.random.normal(key, (nsamples, dim_obs, ch))
+x = jax.random.normal(key, (nsamples, dim_cond, ch))
 
 data = jnp.concatenate([theta, x], axis=1)
 

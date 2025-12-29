@@ -10,19 +10,167 @@ from einops import rearrange
 from typing import Callable, Optional
 from gensbi.recipes.pipeline import AbstractPipeline
 
+from jax import lax
 
-def get_batch_sampler(
-    sampler_fn: Callable,
-    ncond: int,
-):
-    @jax.jit
-    def sampler(key) -> Array:
-        return sampler_fn(key, ncond)
+from tqdm import tqdm
 
-    # Vectorize sampler_fn over batch dimension
-    batched_sampler = jax.vmap(sampler)
-    return batched_sampler
+# def get_batch_sampler(
+#     sampler_fn: Callable,
+#     ncond: int,
+# ):
+#     @jax.jit
+#     def sampler(key) -> Array:
+#         return sampler_fn(key, ncond)
 
+#     # Vectorize sampler_fn over batch dimension
+#     batched_sampler = jax.vmap(sampler)
+#     return batched_sampler
+
+# def get_batch_sampler(
+#     sampler_fn: Callable,
+#     ncond: int,
+# ):
+#     @jax.jit
+#     def sampler(key) -> Array:
+#         return sampler_fn(key, ncond)
+
+#     def batched_sampler(keys):
+#         def body_fn(carry, key):
+#             res = sampler(key)
+#             return carry, res
+#         _, results = jax.lax.scan(body_fn, None, keys)
+#         return results
+
+#     return batched_sampler
+
+# v3
+# def get_batch_sampler(
+#     sampler_fn: Callable,
+#     ncond: int,
+#     chunk_size: Optional[int] = None,
+# ):
+#     def single_sampler(key):
+#         return sampler_fn(key, ncond)
+
+#     @jax.jit
+#     def batched_sampler(keys):
+#         n_samples = keys.shape[0]
+
+#         # --- Path 1: Pure Vmap ---
+#         if chunk_size is None:
+#             return jax.vmap(single_sampler)(keys)
+
+#         # --- Path 2: Chunked Map ---
+#         if n_samples % chunk_size != 0:
+#             raise ValueError(f"Batch size {n_samples} must be divisible by chunk_size {chunk_size}")
+
+#         n_chunks = n_samples // chunk_size
+#         keys_reshaped = keys.reshape(n_chunks, chunk_size, *keys.shape[1:])
+
+#         # Define the function for a single chunk
+#         # No 'carry' argument needed anymore!
+#         def chunk_fn(key_chunk):
+#             return jax.vmap(single_sampler)(key_chunk)
+
+#         # map loops over the first axis (chunks) sequentially
+#         results_stacked = lax.map(chunk_fn, keys_reshaped)
+
+#         return results_stacked.reshape(n_samples, *results_stacked.shape[2:])
+
+#     return batched_sampler
+
+
+# def get_batch_sampler(
+#     sampler_fn: Callable,
+#     ncond: int,
+#     chunk_size: Optional[int] = None,
+# ):
+#     # Wrapper for a single sample (will be vectorized internally)
+#     def single_sampler(key):
+#         return sampler_fn(key, ncond)
+
+#     @jax.jit
+#     def batched_sampler(keys):
+#         n_samples = keys.shape[0]
+
+#         # --- Path 1: Pure Vmap (Unlimited Memory) ---
+#         if chunk_size is None:
+#             return jax.vmap(single_sampler)(keys)
+
+#         # --- Path 2: Chunked Scan (Memory Efficient) ---
+        
+#         # 1. Enforce Divisibility
+#         # This acts as a compile-time assertion for static shapes
+#         if n_samples % chunk_size != 0:
+#             raise ValueError(
+#                 f"Input batch size ({n_samples}) must be divisible by chunk_size ({chunk_size})."
+#             )
+
+#         # 2. Reshape keys: (N, ...) -> (Num_Chunks, Chunk_Size, ...)
+#         # This works for both old keys (N, 2) and new Array keys (N,)
+#         n_chunks = n_samples // chunk_size
+#         keys_reshaped = keys.reshape(n_chunks, chunk_size, *keys.shape[1:])
+
+#         # 3. Define the scan loop (Sequential Chunks, Parallel Inside)
+#         def scan_body(carry, key_chunk):
+#             # vmap processes the specific chunk in parallel
+#             chunk_results = jax.vmap(single_sampler)(key_chunk)
+#             return carry, chunk_results
+
+#         # 4. Run Scan
+#         # scan stacks results along axis 0 automatically
+#         _, results_stacked = jax.lax.scan(scan_body, None, keys_reshaped)
+
+#         # 5. Flatten Output: (Num_Chunks, Chunk_Size, Output_Dim) -> (N, Output_Dim)
+#         return results_stacked.reshape(n_samples, *results_stacked.shape[2:])
+
+#     return batched_sampler
+
+# v4 moved to the pipeline
+# def get_batch_sampler(
+#     sampler_fn: Callable,
+#     ncond: int,
+#     chunk_size: int,
+#     show_progress_bars: bool = True,
+# ):
+#     # JIT the chunk processor
+#     @jax.jit
+#     def process_chunk(key_batch):
+#         return jax.vmap(lambda k: sampler_fn(k, ncond))(key_batch)
+
+#     def sampler(keys):
+#         n_samples = keys.shape[0]
+#         results = []
+        
+#         # Calculate total chunks for tqdm
+#         # We use ceil division to handle remainders
+#         n_chunks = (n_samples + chunk_size - 1) // chunk_size
+        
+#         # Using a tqdm loop
+        
+#         if show_progress_bars:
+#             loop = tqdm(
+#                 range(0, n_samples, chunk_size),
+#                 total=n_chunks,
+#                 desc="Sampling",
+#             )
+#         else:
+#             loop = range(0, n_samples, chunk_size)
+        
+#         for i in loop:
+#             batch_keys = keys[i : i + chunk_size]
+            
+#             chunk_out = process_chunk(batch_keys)
+            
+#             # CRITICAL: Wait for GPU to finish this chunk before updating bar
+#             # This makes the progress bar accurate.
+#             chunk_out.block_until_ready()
+            
+#             results.append(chunk_out)
+            
+#         return jnp.concatenate(results, axis=0)
+
+#     return sampler
 
 class PosteriorWrapper:
     def __init__(self, pipeline: AbstractPipeline, *args, rngs: nnx.Rngs, theta_shape = None, x_shape = None, **kwargs):
@@ -105,6 +253,8 @@ class PosteriorWrapper:
         self,
         sample_shape,
         x: Optional[torch.Tensor] = None,
+        chunk_size: Optional[int] = 50,
+        show_progress_bars = True,
         **kwargs, # does nothing, for compatibility
     ):
         if x is None:
@@ -115,15 +265,27 @@ class PosteriorWrapper:
         if cond.ndim == 2:
             cond = self._unravel_xs(cond)
 
-        sampler = self.pipeline.get_sampler(self.rngs.sample(), cond)
-        batched_sampler = get_batch_sampler(
-            sampler,
-            ncond=cond.shape[0],
+        # TODO: we will have to implement a seed in the get sampler method once we enable latent diffusion, as it is needed for the encoder
+        # Possibly fixed by passing the kwargs, which should include the encoder_key
+        # sampler = self.pipeline.get_sampler(cond, **self.kwargs)
+        # batched_sampler = get_batch_sampler(
+        #     sampler,
+        #     ncond=cond.shape[0],
+        #     chunk_size=chunk_size,
+        #     show_progress_bars=show_progress_bars,
+        # )
+
+        # keys = jax.random.split(self.rngs.sample(), sample_shape[0])
+        
+        key = self.rngs.sample()
+        res = self.pipeline.sample_batched(
+            key,
+            cond,
+            sample_shape[0],
+            chunk_size=chunk_size,
+            show_progress_bars=show_progress_bars,
+            **self.kwargs,  
         )
 
-        keys = jax.random.split(self.rngs.sample(), sample_shape[0])
-        res = batched_sampler(
-            keys,
-        )
         res = rearrange(res, "... f c -> ... (f c)")
         return torch.from_numpy(np.array(res))
