@@ -264,18 +264,8 @@ class PosteriorWrapper:
             
         if cond.ndim == 2:
             cond = self._unravel_xs(cond)
-
-        # TODO: we will have to implement a seed in the get sampler method once we enable latent diffusion, as it is needed for the encoder
-        # Possibly fixed by passing the kwargs, which should include the encoder_key
-        # sampler = self.pipeline.get_sampler(cond, **self.kwargs)
-        # batched_sampler = get_batch_sampler(
-        #     sampler,
-        #     ncond=cond.shape[0],
-        #     chunk_size=chunk_size,
-        #     show_progress_bars=show_progress_bars,
-        # )
-
-        # keys = jax.random.split(self.rngs.sample(), sample_shape[0])
+            
+        chunk_size = self.kwargs.pop("chunk_size", chunk_size)
         
         key = self.rngs.sample()
         res = self.pipeline.sample_batched(
