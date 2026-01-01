@@ -1,0 +1,77 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pandoc
+          python -m pip install --upgrade pip
+          pip install .[test,docs]
+      - name: Lint with flake8
+        run: |
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: Test with pytest
+        run: |
+          pytest --junitxml=reports/junit/junit.xml --cov=gensbi --cov-report=xml:reports/coverage/coverage.xml --cov-report=term-missing
+          # Generate coverage badge
+          genbadge coverage --input-file reports/coverage/coverage.xml --output-file reports/badges/coverage.svg
+          # Generate test results badge
+          genbadge tests --input-file reports/junit/junit.xml --output-file reports/badges/tests.svg
+
+      - name: Copy badges to img/badges
+        run: |
+          mkdir -p img/badges
+          cp reports/badges/*.svg img/badges/
+
+      - name: Commit and push badges to main
+        uses: stefanzweifel/git-auto-commit-action@v6
+
+        with:
+          commit_message: "Update badges [skip ci]"
+          branch: main
+          file_pattern: img/badges/*.svg
+
+      - name: Build documentation
+        run: |
+          cd docs
+          make html
+
+      - name: Deploy docs to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/_build/html
+          publish_branch: gh-pages
+          force_orphan: true
+
+
+
